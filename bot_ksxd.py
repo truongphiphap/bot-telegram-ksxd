@@ -16,7 +16,6 @@ def home():
     return "Bot ksxd.vn đang chạy online 24/7!"
 
 def run_flask():
-    # Render sẽ tự động cấp một cổng thông qua biến môi trường PORT, mặc định là 8080
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
@@ -30,71 +29,99 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_knowledge_base():
-    print("🔄 Đang cào dữ liệu mới nhất từ ksxd.vn...")
-    knowledge = "DỮ LIỆU KIẾN THỨC CẬP NHẬT TỪ WEBSITE KSXD.VN:\n"
+    print("🔄 Đang tiến hành quét và cập nhật dữ liệu từ ksxd.vn...")
+    knowledge = "=== HỆ THỐNG DỮ LIỆU KIẾN THỨC NỀN CỦA WEBSITE KSXD.VN ===\n"
+    
+    # Các quy tắc cốt lõi cố định của anh Pháp
     knowledge += """
-    - Logic rải cây chống (chống formwork): Luôn luôn rải ở phía ngoài (exterior) của đường biên hình học, không rải phía trong.
-    - Công cụ KTKL (Quantity Survey): Hỗ trợ kiểm tra, tính toán khối lượng và tracing 2 chiều giữa Excel và AutoCAD thông qua mã Handle ID của cấu kiện.
+    [QUY TẮC PHẦN MỀM & KỸ THUẬT]:
+    - Logic rải cây chống (chống formwork): Luôn luôn bắt buộc rải ở phía NGOÀI (exterior) của đường biên hình học, tuyệt đối không rải phía trong.
+    - Công cụ KTKL (Quantity Survey): Hỗ trợ kiểm tra, tính toán khối lượng và tracing (truy vết) 2 chiều linh hoạt giữa Excel và AutoCAD thông qua mã định danh duy nhất Handle ID của cấu kiện.
+    - Tiện ích khác: Chia sẻ các file mẫu Excel chuyên sâu phục vụ quản lý hồ sơ thanh toán, hồ sơ quyết toán và quản lý công nợ cuối năm cho nhà thầu xây dựng.
     """
+    
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         sitemap_response = requests.get(SITEMAP_URL, headers=headers, timeout=10)
+        
         if sitemap_response.status_code == 200:
+            print("✅ Đã kết nối sitemap thành công. Đang trích xuất link bài viết...")
             soup = BeautifulSoup(sitemap_response.content, 'xml')
             urls = [loc.text for loc in soup.find_all('loc')][:7]
+            
             for url in urls:
                 try:
                     page_response = requests.get(url, headers=headers, timeout=5)
                     if page_response.status_code == 200:
                         page_soup = BeautifulSoup(page_response.content, 'html.parser')
-                        title = page_soup.find('title').text if page_soup.find('title') else ""
-                        paragraphs = [p.text for p in page_soup.find_all('p')]
-                        content = " ".join(paragraphs)[:1000]
-                        knowledge += f"\n--- Bài viết: {title} (Link: {url}) ---\nNội dung: {content}\n"
+                        title = page_soup.find('title').text.strip() if page_soup.find('title') else "Bài viết không tiêu đề"
+                        paragraphs = [p.text.strip() for p in page_soup.find_all('p') if p.text.strip()]
+                        content = " ".join(paragraphs)[:1200]
+                        
+                        knowledge += f"\n[BÀI VIẾT]: {title}\n[ĐƯỜNG DẪN]: {url}\n[NỘI DUNG]: {content}\n-----------------------------\n"
                 except Exception as e:
-                    print(f"Lỗi link {url}: {e}")
+                    print(f"❌ Lỗi khi đọc nội dung tại link {url}: {e}")
         else:
+            print("⚠️ Không tìm thấy hoặc lỗi sitemap, tự động chuyển sang đọc dữ liệu trang chủ...")
             homepage_res = requests.get(WEBSITE_URL, headers=headers, timeout=10)
             homepage_soup = BeautifulSoup(homepage_res.content, 'html.parser')
-            knowledge += homepage_soup.get_text()[:4000]
+            knowledge += f"\n[TRANG CHỦ TỔNG HỢP]:\n{homepage_soup.get_text()[:4000]}"
+            
     except Exception as e:
-        knowledge += "\n(Không kết nối được website, sử dụng kiến thức gốc)."
+        print(f"❌ Lỗi tổng thể trong quá trình cào web: {e}")
+        knowledge += "\n(Hệ thống gặp lỗi kết nối internet với website, tạm thời sử dụng kiến thức kỹ thuật gốc ở trên)."
+        
     return knowledge
 
 def ask_gemini_with_context(user_question):
     context = get_knowledge_base()
-    prompt = f"""
-    Bạn là một trợ lý ảo thông minh của cộng đồng kỹ sư xây dựng ksxd.vn.
-    Hãy dựa vào dữ liệu kiến thức được cập nhật trực tiếp từ website dưới đây để trả lời câu hỏi của người dùng một cách ngắn gọn, chuyên nghiệp và thực tế.
-    Ưu tiên cung cấp link bài viết tương ứng có trong dữ liệu kiến thức để người dùng click vào xem.
-    Nếu câu hỏi không liên quan đến kiến thức được cung cấp, hãy lịch sự từ chối và hướng dẫn họ truy cập website ksxd.vn để tìm hiểu thêm.
-
-    DỮ LIỆU KIẾN THỨC WEB:
-    {context}
-
-    CÂU HỎI CỦA NGƯỜI DÙNG:
-    {user_question}
     
-    CÂU TRẢ LỜI CỦA BẠN:
+    # Thiết lập cấu trúc Prompt cô lập câu hỏi và ra lệnh nghiêm ngặt
+    prompt = f"""
+    Bạn là một chuyên gia và là Trợ lý ảo thông minh đại diện cho website chuyên ngành xây dựng ksxd.vn.
+    Nhiệm vụ duy nhất của bạn là giải đáp câu hỏi của người dùng dựa trên thông tin được cung cấp trong phần DỮ LIỆU KIẾN THỨC dưới đây.
+
+    ⚠️ QUY TẮC BẮT BUỘC:
+    1. KHÔNG ĐƯỢC lặp lại, sao chép hoặc trích dẫn lại nguyên văn câu hỏi của người dùng dưới mọi hình thức.
+    2. Tập trung trả lời thẳng vào bản chất câu hỏi một cách ngắn gọn, mạch lạc, chính xác theo tư duy kỹ sư.
+    3. Nếu trong phần DỮ LIỆU KIẾN THỨC có chứa đường dẫn (Link) phù hợp với câu hỏi, hãy đính kèm link đó vào câu trả lời để người dùng bấm vào xem.
+    4. Nếu câu hỏi nằm ngoài phạm vi thông tin được cung cấp, hãy lịch sự từ chối và hướng dẫn họ truy cập trực tiếp website ksxd.vn để tra cứu thêm.
+
+    --- BẮT ĐẦU DỮ LIỆU KIẾN THỨC ĐƯỢC CẤP ---
+    {context}
+    --- KẾT THÚC DỮ LIỆU KIẾN THỨC ĐƯỢC CẤP ---
+
+    [CÂU HỎI CỦA NGƯỜI DÙNG]:
+    "{user_question}"
+
+    [CÂU TRẢ LỜI CỦA TRỢ LÝ]:
     """
+    
     max_retries = 3
     retry_delay = 2
     for attempt in range(max_retries):
         try:
-            response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            return response.text
+            response = ai_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            return response.text.strip()
         except Exception as e:
             if "503" in str(e) and attempt < max_retries - 1:
                 time.sleep(retry_delay)
                 continue
-            return "🤖 Hiện tại hệ thống phản hồi từ ksxd.vn đang bận một chút do nghẽn mạng. Anh/em vui lòng thử lại câu hỏi sau vài giây nhé!"
+            return "🤖 Hiện tại hệ thống kết nối AI đang bận xử lý dữ liệu. Anh/em vui lòng gửi lại câu hỏi sau vài giây nhé!"
 
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     user_text = message.text
+    if not user_text:
+        return
+        
     status_msg = bot.reply_to(message, "🔄 Bot đang kiểm tra dữ liệu mới nhất trên ksxd.vn để trả lời, chờ em tí nhé...")
     ai_reply = ask_gemini_with_context(user_text)
     bot.reply_to(message, ai_reply)
+    
     try:
         bot.delete_message(message.chat.id, status_msg.message_id)
     except:
@@ -102,10 +129,8 @@ def handle_all_messages(message):
 
 # --- KÍCH HOẠT CHẠY SONG SONG CẢ WEB LẪN BOT ---
 if __name__ == "__main__":
-    # Chạy Web mồi ở một luồng riêng (Thread) để Render không báo lỗi Port
     t = Thread(target=run_flask)
     t.start()
     
-    # Chạy bot Telegram ở luồng chính
-    print("🤖 Bot ksxd.vn trực tuyến 24/7...")
+    print("🤖 Bot ksxd.vn trực tuyến và sẵn sàng phục vụ 24/7...")
     bot.infinity_polling()
