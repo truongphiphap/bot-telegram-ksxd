@@ -7,7 +7,7 @@ from flask import Flask, request
 
 # --- CẤU HÌNH CONFIG BOT TELEGRAM & AI ---
 TELEGRAM_TOKEN = "8683129988:AAFiRv0_v6qinrCLsFJcGshgLMygAJEvJv8"
-GEMINI_API_KEY = "AIzaSyB2m-FuYAyHdx7n0JPgM4hbWCGTBQCjNUg"
+GEMINI_API_KEY = "AIzaSyAZOtXiANWEiZ8CNvrXOQbTkwJZfStaJcU"
 
 # Khởi tạo Bot và AI Client (threaded=False bảo vệ tài nguyên gói free)
 bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
